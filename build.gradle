@@ -1,0 +1,151 @@
+plugins {
+    id "de.undercouch.download" version "4.0.4"
+    id 'maven-publish'
+}
+
+group 'xerces4j-with-deps'
+
+def xercesVersion='2.12.1'
+def maintenanceVersion = '0-SNAPSHOT'
+version xercesVersion + '.' + maintenanceVersion
+
+def distFileSchema10 = "Xerces-J-bin.${xercesVersion}.zip"
+def distFileSchema11 = "Xerces-J-bin.${xercesVersion}-xml-schema-1.1.zip"
+
+def extractDir10 = new File(buildDir, 'work_schema_10')
+def extractDir11 = new File(buildDir, 'work_schema_11')
+
+def distDir = new File(buildDir, 'xerces_dist');
+
+task downloadXercesDist(type: Download) {
+    src ([
+            "https://archive.apache.org/dist/xerces/j/binaries/${distFileSchema10}",
+            "https://archive.apache.org/dist/xerces/j/binaries/${distFileSchema11}",
+    ])
+    dest distDir
+    onlyIfModified true
+}
+
+task extractDistSchema10(dependsOn: downloadXercesDist, type: Copy) {
+    from zipTree(new File(distDir, distFileSchema10))
+    into extractDir10
+}
+
+task extractDistSchema11(dependsOn: downloadXercesDist, type: Copy) {
+    from zipTree(new File(distDir, distFileSchema11))
+    into extractDir11
+}
+
+def workDir10 = new File(extractDir10, "xerces-${xercesVersion.replaceAll("\\.", "_")}")
+def workDir11 = new File(extractDir11, "xerces-${xercesVersion.replaceAll("\\.", "_")}-xml-schema-1.1")
+
+task uberJarSchema11WithIcu(type: Jar, dependsOn: extractDistSchema11) {
+    destinationDirectory.set(buildDir)
+    archiveFileName.set('xercesImpl-schema11-icu.jar');
+
+    from(zipTree(new File(workDir11, 'org.eclipse.wst.xml.xpath2.processor_1.2.0.jar'))) {
+        exclude "META-INF/*.SF"
+        exclude "META-INF/*.DSA"
+        exclude "META-INF/*.RSA"
+    }
+
+    from(zipTree(new File(workDir11, 'icu4j.jar'))) {
+        exclude "META-INF/*.SF"
+        exclude "META-INF/*.DSA"
+        exclude "META-INF/*.RSA"
+    }
+
+    from(zipTree(new File(workDir11, 'xercesImpl.jar')))
+}
+
+task uberJarSchema11(type: Jar, dependsOn: extractDistSchema11) {
+    destinationDirectory.set(buildDir)
+    archiveFileName.set('xercesImpl-schema11.jar');
+
+    from(zipTree(new File(workDir11, 'org.eclipse.wst.xml.xpath2.processor_1.2.0.jar'))) {
+        exclude "META-INF/*.SF"
+        exclude "META-INF/*.DSA"
+        exclude "META-INF/*.RSA"
+    }
+
+    from(zipTree(new File(workDir11, 'xercesImpl.jar')))
+}
+
+def appendPomDependency(def depsNode, String groupId, String artifactId, String version, String scope, boolean optional = false) {
+    def dependency = depsNode.appendNode('dependency')
+    dependency.appendNode('groupId', groupId)
+    dependency.appendNode('artifactId', artifactId)
+    dependency.appendNode('version', version)
+    dependency.appendNode('scope', scope)
+
+    if (optional) {
+        dependency.appendNode('optional', true)
+    }
+}
+
+publishing {
+    repositories {
+        maven {
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/alex-bel/xerces4j-with-deps")
+            credentials {
+                username = project.findProperty("gpr.user") ?: System.getenv("USERNAME")
+                password = project.findProperty("gpr.key") ?: System.getenv("PASSWORD")
+            }
+        }
+    }
+    publications {
+        publishUberjarSchema11WithIcu(MavenPublication) {
+            artifactId 'xerces-schema-1.1-icu'
+            artifact uberJarSchema11WithIcu.archiveFile
+
+            pom {
+                packaging = 'jar'
+            }
+
+            pom.withXml {
+                def root = asNode()
+                def deps = root.appendNode('dependencies')
+                appendPomDependency(deps, 'edu.princeton.cup', 'java-cup', '10k', 'runtime')
+                appendPomDependency(deps, 'xml-resolver', 'xml-resolver', '1.2', 'runtime')
+                appendPomDependency(deps, 'xml-apis', 'xml-apis', '1.4.01', 'runtime', true)
+            }
+        }
+
+        publishUberjarSchema11(MavenPublication) {
+            artifactId 'xerces-schema-1.1'
+            artifact uberJarSchema11.archiveFile
+
+            pom {
+                packaging = 'jar'
+            }
+
+            pom.withXml {
+                def root = asNode()
+                def deps = root.appendNode('dependencies')
+                appendPomDependency(deps, 'edu.princeton.cup', 'java-cup', '10k', 'runtime')
+                appendPomDependency(deps, 'xml-resolver', 'xml-resolver', '1.2', 'runtime')
+                appendPomDependency(deps, 'com.ibm.icu', 'icu4j', '4.6', 'runtime')
+                appendPomDependency(deps, 'xml-apis', 'xml-apis', '1.4.01', 'runtime', true)
+            }
+        }
+
+        publishUberjarSchema10(MavenPublication) {
+            artifactId 'xerces'
+            artifact(new File(workDir10, 'xercesImpl.jar')) {
+                builtBy extractDistSchema10
+            }
+
+            pom {
+                packaging = 'jar'
+            }
+
+            pom.withXml {
+                def root = asNode()
+                def deps = root.appendNode('dependencies')
+                appendPomDependency(deps, 'xml-resolver', 'xml-resolver', '1.2', 'runtime')
+                appendPomDependency(deps, 'xml-apis', 'xml-apis', '1.4.01', 'runtime', true)
+            }
+        }
+    }
+}
